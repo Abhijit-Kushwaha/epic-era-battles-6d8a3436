@@ -80,11 +80,16 @@ export default {
           "0%, 100%": { boxShadow: "0 0 10px hsl(42 85% 55% / 0.3)" },
           "50%": { boxShadow: "0 0 25px hsl(42 85% 55% / 0.6)" },
         },
+        "fade-in": {
+          "0%": { opacity: "0", transform: "translateY(10px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "pulse-glow": "pulse-glow 2s ease-in-out infinite",
+        "fade-in": "fade-in 0.3s ease-out",
       },
     },
   },

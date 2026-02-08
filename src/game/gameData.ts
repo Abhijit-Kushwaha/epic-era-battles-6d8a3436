@@ -15,7 +15,13 @@ export interface Fighter {
   speed: number;
   specialName: string;
   specialDamage: number;
-  specialCooldown: number;
+  color: string;
+}
+
+export interface HistoricalFact {
+  era: string;
+  fact: string;
+  lesson: string;
 }
 
 export interface Era {
@@ -26,6 +32,7 @@ export interface Era {
   bgImage: string;
   color: string;
   fighters: Fighter[];
+  facts: HistoricalFact[];
 }
 
 export const ERAS: Era[] = [
@@ -47,10 +54,10 @@ export const ERAS: Era[] = [
         maxHp: 100,
         attack: 22,
         defense: 15,
-        speed: 12,
+        speed: 5,
         specialName: "Gladius Fury",
         specialDamage: 40,
-        specialCooldown: 3,
+        color: "#c8a84e",
       },
       {
         id: "spartan",
@@ -62,10 +69,10 @@ export const ERAS: Era[] = [
         maxHp: 120,
         attack: 18,
         defense: 22,
-        speed: 10,
+        speed: 4,
         specialName: "Phalanx Charge",
         specialDamage: 35,
-        specialCooldown: 3,
+        color: "#8b0000",
       },
       {
         id: "pharaoh",
@@ -77,11 +84,17 @@ export const ERAS: Era[] = [
         maxHp: 90,
         attack: 25,
         defense: 12,
-        speed: 14,
+        speed: 6,
         specialName: "Sun God's Wrath",
         specialDamage: 45,
-        specialCooldown: 4,
+        color: "#d4a017",
       },
+    ],
+    facts: [
+      { era: "ancient", fact: "The Roman Colosseum could hold 50,000–80,000 spectators and had a retractable roof.", lesson: "Engineering mastery existed thousands of years ago — innovation isn't new!" },
+      { era: "ancient", fact: "Spartans trained for war from age 7. The word 'spartan' now means strict discipline.", lesson: "Discipline and training can overcome superior numbers." },
+      { era: "ancient", fact: "Ancient Egypt had female pharaohs, including Hatshepsut who ruled for 20 years.", lesson: "Leadership knows no gender — history proves it." },
+      { era: "ancient", fact: "The Battle of Thermopylae (480 BC): 300 Spartans held off a Persian army of 100,000+.", lesson: "Courage and strategy can overcome overwhelming odds." },
     ],
   },
   {
@@ -102,10 +115,10 @@ export const ERAS: Era[] = [
         maxHp: 110,
         attack: 20,
         defense: 20,
-        speed: 10,
+        speed: 4,
         specialName: "Holy Strike",
         specialDamage: 38,
-        specialCooldown: 3,
+        color: "#c0c0c0",
       },
       {
         id: "viking",
@@ -117,10 +130,10 @@ export const ERAS: Era[] = [
         maxHp: 95,
         attack: 28,
         defense: 10,
-        speed: 15,
+        speed: 6,
         specialName: "Berserker Rage",
         specialDamage: 50,
-        specialCooldown: 4,
+        color: "#4a6741",
       },
       {
         id: "samurai",
@@ -132,11 +145,17 @@ export const ERAS: Era[] = [
         maxHp: 100,
         attack: 24,
         defense: 14,
-        speed: 18,
+        speed: 7,
         specialName: "Blade Storm",
         specialDamage: 42,
-        specialCooldown: 3,
+        color: "#b22222",
       },
+    ],
+    facts: [
+      { era: "medieval", fact: "Vikings were actually skilled traders and explorers — they reached North America 500 years before Columbus.", lesson: "Don't judge a culture by stereotypes — dig deeper!" },
+      { era: "medieval", fact: "Samurai followed 'Bushido' — a code of honor, loyalty, and self-discipline.", lesson: "True strength comes from character, not just combat." },
+      { era: "medieval", fact: "Medieval knights' armor weighed 20–25 kg. They trained from childhood to fight in it.", lesson: "Preparation is everything — skill takes years to build." },
+      { era: "medieval", fact: "The Mongol Empire was the largest contiguous land empire, spanning 24 million km².", lesson: "Unity and organization can build something extraordinary." },
     ],
   },
   {
@@ -157,10 +176,10 @@ export const ERAS: Era[] = [
         maxHp: 105,
         attack: 24,
         defense: 18,
-        speed: 14,
+        speed: 6,
         specialName: "Plasma Blast",
         specialDamage: 44,
-        specialCooldown: 3,
+        color: "#00bcd4",
       },
       {
         id: "mech",
@@ -172,10 +191,10 @@ export const ERAS: Era[] = [
         maxHp: 130,
         attack: 20,
         defense: 25,
-        speed: 8,
+        speed: 3,
         specialName: "Orbital Strike",
         specialDamage: 55,
-        specialCooldown: 5,
+        color: "#607d8b",
       },
       {
         id: "psion",
@@ -187,11 +206,17 @@ export const ERAS: Era[] = [
         maxHp: 80,
         attack: 30,
         defense: 8,
-        speed: 20,
+        speed: 8,
         specialName: "Mind Shatter",
         specialDamage: 48,
-        specialCooldown: 3,
+        color: "#9c27b0",
       },
+    ],
+    facts: [
+      { era: "future", fact: "AI was first conceptualized by Alan Turing in 1950 with the 'Turing Test'.", lesson: "Today's technology stands on the shoulders of past visionaries." },
+      { era: "future", fact: "The first video game was created in 1958 — 'Tennis for Two' on an oscilloscope.", lesson: "Every revolution starts small — your ideas matter!" },
+      { era: "future", fact: "Quantum computers can solve in minutes what would take classical computers millions of years.", lesson: "New approaches can solve 'impossible' problems." },
+      { era: "future", fact: "Space travel technology from the 1960s had less computing power than a modern smartphone.", lesson: "Resourcefulness and creativity matter more than raw power." },
     ],
   },
 ];

@@ -1,16 +1,25 @@
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Era, Fighter, ERAS } from "@/game/gameData";
 import EraSelect from "@/components/EraSelect";
 import FighterSelect from "@/components/FighterSelect";
-import CombatArena from "@/components/CombatArena";
+import CombatArena2D from "@/components/CombatArena2D";
+import HistoryFactScreen from "@/components/HistoryFactScreen";
 import heroBg from "@/assets/hero-bg.jpg";
 
-type Screen = "home" | "era" | "fighter" | "combat";
+type Screen = "home" | "era" | "fighter" | "combat" | "fact";
 
 const Index = () => {
   const [screen, setScreen] = useState<Screen>("home");
   const [selectedEra, setSelectedEra] = useState<Era | null>(null);
   const [selectedFighter, setSelectedFighter] = useState<Fighter | null>(null);
+  const [lastWon, setLastWon] = useState(false);
+  const [combatKey, setCombatKey] = useState(0);
+
+  const randomFact = useMemo(() => {
+    if (!selectedEra) return null;
+    const facts = selectedEra.facts;
+    return facts[Math.floor(Math.random() * facts.length)];
+  }, [selectedEra, screen]);
 
   const handleEraSelect = (era: Era) => {
     setSelectedEra(era);
@@ -19,28 +28,50 @@ const Index = () => {
 
   const handleFighterSelect = (fighter: Fighter) => {
     setSelectedFighter(fighter);
+    setCombatKey((k) => k + 1);
     setScreen("combat");
   };
 
-  const handleReset = () => {
+  const handleCombatEnd = useCallback((won: boolean) => {
+    setLastWon(won);
+    setScreen("fact");
+  }, []);
+
+  const handleFightAgain = useCallback(() => {
+    setCombatKey((k) => k + 1);
+    setScreen("combat");
+  }, []);
+
+  const handleNewBattle = useCallback(() => {
     setScreen("era");
     setSelectedFighter(null);
-  };
+    setSelectedEra(null);
+  }, []);
 
   if (screen === "combat" && selectedEra && selectedFighter) {
     return (
-      <CombatArena
-        key={selectedFighter.id + Date.now()}
+      <CombatArena2D
+        key={combatKey}
         era={selectedEra}
         player={selectedFighter}
-        onEnd={handleReset}
+        onEnd={handleCombatEnd}
+      />
+    );
+  }
+
+  if (screen === "fact" && selectedEra && randomFact) {
+    return (
+      <HistoryFactScreen
+        fact={randomFact}
+        won={lastWon}
+        onContinue={handleNewBattle}
+        onFightAgain={handleFightAgain}
       />
     );
   }
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center">
-      {/* Background for home/era/fighter screens */}
       {screen === "home" && (
         <>
           <div
@@ -58,10 +89,10 @@ const Index = () => {
               ERA WARS
             </h1>
             <p className="text-lg md:text-xl text-muted-foreground max-w-lg mb-2 font-body">
-              Warriors from across history clash in the ultimate battle
+              Fight through history. Learn from the past.
             </p>
             <p className="text-sm text-muted-foreground mb-8">
-              Choose your era. Pick your fighter. Dominate the arena.
+              Real-time 2D combat with warriors from every era. Move, jump, attack, and discover historical truths.
             </p>
             <button
               onClick={() => setScreen("era")}
@@ -69,14 +100,32 @@ const Index = () => {
             >
               ⚔️ Enter the Arena
             </button>
+
+            <div className="mt-8 grid grid-cols-3 gap-4 text-center max-w-sm">
+              <div className="card-battle p-3">
+                <div className="text-2xl mb-1">🎮</div>
+                <p className="text-xs text-muted-foreground">Real-time 2D Combat</p>
+              </div>
+              <div className="card-battle p-3">
+                <div className="text-2xl mb-1">📜</div>
+                <p className="text-xs text-muted-foreground">Learn History</p>
+              </div>
+              <div className="card-battle p-3">
+                <div className="text-2xl mb-1">⚔️</div>
+                <p className="text-xs text-muted-foreground">Cross-Era Fights</p>
+              </div>
+            </div>
           </div>
         )}
 
         {screen === "era" && (
           <div className="flex flex-col items-center">
-            <h2 className="font-display font-bold text-3xl gold-gradient-text text-center mb-8">
+            <h2 className="font-display font-bold text-3xl gold-gradient-text text-center mb-2">
               Choose Your Era
             </h2>
+            <p className="text-sm text-muted-foreground mb-8 text-center">
+              Each era holds warriors and lessons from history
+            </p>
             <EraSelect eras={ERAS} onSelect={handleEraSelect} />
           </div>
         )}
