@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import { Era, Fighter, ERAS } from "@/game/gameData";
 import EraSelect from "@/components/EraSelect";
 import FighterSelect from "@/components/FighterSelect";
-import CombatArena2D from "@/components/CombatArena2D";
+import CombatArena3D from "@/components/CombatArena3D";
 import HistoryFactScreen from "@/components/HistoryFactScreen";
 import heroBg from "@/assets/hero-bg.jpg";
 
@@ -50,7 +50,7 @@ const Index = () => {
 
   if (screen === "combat" && selectedEra && selectedFighter) {
     return (
-      <CombatArena2D
+      <CombatArena3D
         key={combatKey}
         era={selectedEra}
         player={selectedFighter}
