@@ -42,6 +42,16 @@ export const ERA_WEAPONS: EraWeapons = {
     projectileSpeed: 25,
     emoji: "⚔️",
   },
+  modern: {
+    name: "Assault Rifle",
+    damage: 18,
+    range: 55,
+    fireRate: 5,
+    reloadTime: 2,
+    magSize: 30,
+    projectileSpeed: 80,
+    emoji: "🔫",
+  },
   future: {
     name: "Laser Rifle",
     damage: 20,
@@ -50,7 +60,7 @@ export const ERA_WEAPONS: EraWeapons = {
     reloadTime: 1.5,
     magSize: 12,
     projectileSpeed: 60,
-    emoji: "🔫",
+    emoji: "⚡",
   },
 };
 
@@ -82,10 +92,25 @@ export interface EnemyState {
   maxHp: number;
   isDead: boolean;
   respawnTimer: number;
-  aiState: "idle" | "patrol" | "chase" | "attack" | "flee";
+  aiState: "idle" | "patrol" | "chase" | "attack" | "flee" | "cover" | "flank";
   targetPoint: Vec3;
   lastFireTime: number;
   ammo: number;
+  archetypeId: string;
+  archetypeName: string;
+  archetypeEmoji: string;
+  personality: {
+    aggression: number;
+    accuracy: number;
+    awareness: number;
+    courage: number;
+    reactionSpeed: number;
+  };
+  behavior: "rush" | "snipe" | "defend" | "flank" | "demolish" | "jetpack";
+  speed: number;
+  fireInterval: number;
+  damage: number;
+  color: string;
 }
 
 export interface Projectile {

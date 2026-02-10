@@ -1,19 +1,21 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Sky, Text } from "@react-three/drei";
+import { Sky, Text, Stars } from "@react-three/drei";
 import * as THREE from "three";
 import { Era, Fighter } from "@/game/gameData";
 import { use3DGameEngine } from "@/game/use3DGameEngine";
 import { ERA_COLORS } from "@/game/mapData";
 import { MapBlock, EnemyState, Projectile, PlayerState } from "@/game/types3d";
+import { PlayerEconomy } from "@/game/economySystem";
 
 interface CombatArena3DProps {
   era: Era;
   player: Fighter;
-  onEnd: (won: boolean) => void;
+  economy?: PlayerEconomy;
+  onEnd: (won: boolean, earnedCoins: number) => void;
 }
 
-// Camera controller: third-person following player
+// Camera controller
 function CameraController({
   playerPos,
   mouseRotRef,
@@ -70,7 +72,7 @@ function CameraController({
   return null;
 }
 
-// Voxel-style player character
+// Voxel character with archetype indicators
 function VoxelCharacter({
   position,
   rotation,
@@ -81,6 +83,7 @@ function VoxelCharacter({
   maxHp,
   isDead,
   name,
+  emoji,
 }: {
   position: { x: number; y: number; z: number };
   rotation: number;
@@ -91,9 +94,9 @@ function VoxelCharacter({
   maxHp: number;
   isDead: boolean;
   name: string;
+  emoji?: string;
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const headRef = useRef<THREE.Mesh>(null);
   const legLRef = useRef<THREE.Mesh>(null);
   const legRRef = useRef<THREE.Mesh>(null);
   const armLRef = useRef<THREE.Mesh>(null);
@@ -106,11 +109,9 @@ function VoxelCharacter({
       new THREE.Vector3(position.x, position.y, position.z),
       0.2
     );
-    // Smooth rotation
     const targetRot = new THREE.Euler(0, rotation, 0);
     groupRef.current.rotation.y += (targetRot.y - groupRef.current.rotation.y) * 0.15;
 
-    // Walking animation
     const isMoving = Math.abs(position.x - groupRef.current.position.x) > 0.01 ||
                      Math.abs(position.z - groupRef.current.position.z) > 0.01;
     if (isMoving) {
@@ -136,32 +137,32 @@ function VoxelCharacter({
   return (
     <group ref={groupRef}>
       {/* Head */}
-      <mesh ref={headRef} position={[0, bodyH + 0.65 + baseY, 0]}>
+      <mesh position={[0, bodyH + 0.65 + baseY, 0]} castShadow>
         <boxGeometry args={[0.5, 0.5, 0.5]} />
-        <meshStandardMaterial color={color} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
       </mesh>
       {/* Eyes */}
       <mesh position={[0.12, bodyH + 0.7 + baseY, 0.26]}>
         <boxGeometry args={[0.08, 0.08, 0.02]} />
-        <meshStandardMaterial color="white" />
+        <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.3} />
       </mesh>
       <mesh position={[-0.12, bodyH + 0.7 + baseY, 0.26]}>
         <boxGeometry args={[0.08, 0.08, 0.02]} />
-        <meshStandardMaterial color="white" />
+        <meshStandardMaterial color="white" emissive="white" emissiveIntensity={0.3} />
       </mesh>
 
       {/* Body */}
-      <mesh position={[0, bodyH * 0.5 + 0.15 + baseY, 0]}>
+      <mesh position={[0, bodyH * 0.5 + 0.15 + baseY, 0]} castShadow>
         <boxGeometry args={[0.5, bodyH, 0.3]} />
-        <meshStandardMaterial color={color} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
       </mesh>
 
       {/* Arms */}
-      <mesh ref={armLRef} position={[0.4, bodyH * 0.5 + 0.2 + baseY, 0]}>
+      <mesh ref={armLRef} position={[0.4, bodyH * 0.5 + 0.2 + baseY, 0]} castShadow>
         <boxGeometry args={[0.2, 0.5, 0.2]} />
         <meshStandardMaterial color={color} roughness={0.6} />
       </mesh>
-      <mesh ref={armRRef} position={[-0.4, bodyH * 0.5 + 0.2 + baseY, 0]}>
+      <mesh ref={armRRef} position={[-0.4, bodyH * 0.5 + 0.2 + baseY, 0]} castShadow>
         <boxGeometry args={[0.2, 0.5, 0.2]} />
         <meshStandardMaterial color={color} roughness={0.6} />
       </mesh>
@@ -169,32 +170,30 @@ function VoxelCharacter({
       {/* Legs */}
       {!isCrouching && (
         <>
-          <mesh ref={legLRef} position={[0.12, -0.15 + baseY, 0]}>
+          <mesh ref={legLRef} position={[0.12, -0.15 + baseY, 0]} castShadow>
             <boxGeometry args={[0.2, 0.5, 0.2]} />
-            <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.7)} />
+            <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.7)} roughness={0.7} />
           </mesh>
-          <mesh ref={legRRef} position={[-0.12, -0.15 + baseY, 0]}>
+          <mesh ref={legRRef} position={[-0.12, -0.15 + baseY, 0]} castShadow>
             <boxGeometry args={[0.2, 0.5, 0.2]} />
-            <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.7)} />
+            <meshStandardMaterial color={new THREE.Color(color).multiplyScalar(0.7)} roughness={0.7} />
           </mesh>
         </>
       )}
 
-      {/* HP bar above head */}
+      {/* HP bar + name above head */}
       {!isPlayer && (
         <group position={[0, bodyH + 1.2 + baseY, 0]}>
-          {/* Background */}
           <mesh>
             <planeGeometry args={[1, 0.1]} />
-            <meshBasicMaterial color="#333" />
+            <meshBasicMaterial color="#333" transparent opacity={0.8} />
           </mesh>
-          {/* Fill */}
           <mesh position={[-(1 - hp / maxHp) * 0.5, 0, 0.001]}>
             <planeGeometry args={[(hp / maxHp) * 1, 0.08]} />
             <meshBasicMaterial color={hp / maxHp > 0.5 ? "#4caf50" : hp / maxHp > 0.25 ? "#ff9800" : "#f44336"} />
           </mesh>
-          <Text position={[0, 0.15, 0]} fontSize={0.15} color="white" anchorX="center" anchorY="middle">
-            {name}
+          <Text position={[0, 0.15, 0]} fontSize={0.12} color="white" anchorX="center" anchorY="middle">
+            {emoji ? `${emoji} ${name}` : name}
           </Text>
         </group>
       )}
@@ -202,7 +201,7 @@ function VoxelCharacter({
   );
 }
 
-// Projectile visuals
+// Projectile visuals with glow
 function ProjectileMesh({ proj, eraId }: { proj: Projectile; eraId: string }) {
   const ref = useRef<THREE.Mesh>(null);
 
@@ -212,29 +211,38 @@ function ProjectileMesh({ proj, eraId }: { proj: Projectile; eraId: string }) {
     }
   });
 
-  const color = eraId === "future" ? "#00e5ff" : eraId === "medieval" ? "#ff8800" : "#8B4513";
-  const size = eraId === "future" ? 0.08 : 0.12;
+  const config: Record<string, { color: string; size: number; intensity: number }> = {
+    future: { color: "#00e5ff", size: 0.08, intensity: 4 },
+    modern: { color: "#ffaa00", size: 0.06, intensity: 3 },
+    medieval: { color: "#ff8800", size: 0.12, intensity: 2 },
+    ancient: { color: "#8B4513", size: 0.12, intensity: 1 },
+  };
+  const c = config[eraId] || config.ancient;
 
   return (
-    <mesh ref={ref} position={[proj.position.x, proj.position.y, proj.position.z]}>
-      <sphereGeometry args={[size, 6, 6]} />
-      <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2} />
-    </mesh>
+    <group>
+      <mesh ref={ref} position={[proj.position.x, proj.position.y, proj.position.z]}>
+        <sphereGeometry args={[c.size, 8, 8]} />
+        <meshStandardMaterial color={c.color} emissive={c.color} emissiveIntensity={c.intensity} />
+      </mesh>
+      {/* Point light for glow effect */}
+      <pointLight position={[proj.position.x, proj.position.y, proj.position.z]} color={c.color} intensity={0.5} distance={3} />
+    </group>
   );
 }
 
-// Map blocks
+// Map blocks with enhanced materials
 function MapBlockMesh({ block, eraId }: { block: MapBlock; eraId: string }) {
   const colors = ERA_COLORS[eraId as keyof typeof ERA_COLORS] || ERA_COLORS.ancient;
   const color = colors[block.color as keyof typeof colors] || "#888";
 
   return (
-    <mesh position={[block.position.x, block.position.y, block.position.z]}>
+    <mesh position={[block.position.x, block.position.y, block.position.z]} receiveShadow castShadow>
       <boxGeometry args={[block.size.x, block.size.y, block.size.z]} />
       <meshStandardMaterial
         color={color}
-        roughness={0.8}
-        metalness={block.type === "wall" ? 0.2 : 0}
+        roughness={block.type === "ground" ? 0.9 : 0.6}
+        metalness={block.type === "wall" ? 0.15 : block.type === "platform" ? 0.1 : 0}
       />
     </mesh>
   );
@@ -246,12 +254,14 @@ function GameHUD({
   weapon,
   killFeed,
   eraId,
+  earnedCoins,
   onExit,
 }: {
   player: PlayerState;
   weapon: { name: string; emoji: string; magSize: number };
   killFeed: string[];
   eraId: string;
+  earnedCoins: number;
   onExit: () => void;
 }) {
   return (
@@ -264,6 +274,7 @@ function GameHUD({
             <div className="absolute left-1/2 bottom-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
             <div className="absolute right-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
+            <div className="absolute left-1/2 top-1/2 w-1 h-1 rounded-full bg-red-500/60 -translate-x-1/2 -translate-y-1/2" />
           </div>
         </div>
       )}
@@ -271,7 +282,7 @@ function GameHUD({
       {/* HP Bar */}
       <div className="absolute bottom-6 left-6">
         <div className="font-display text-xs text-primary mb-1">HP</div>
-        <div className="w-48 h-4 bg-muted rounded-full overflow-hidden">
+        <div className="w-48 h-4 bg-muted rounded-full overflow-hidden border border-border">
           <div
             className="h-full rounded-full transition-all duration-200"
             style={{
@@ -280,7 +291,7 @@ function GameHUD({
             }}
           />
         </div>
-        <div className="font-body text-xs text-foreground mt-0.5">{player.hp}/{player.maxHp}</div>
+        <div className="font-body text-xs text-foreground mt-0.5">{Math.round(player.hp)}/{player.maxHp}</div>
       </div>
 
       {/* Ammo */}
@@ -295,9 +306,10 @@ function GameHUD({
         </div>
       </div>
 
-      {/* Kill/Death counter */}
-      <div className="absolute top-4 right-6 font-body text-sm">
-        <span className="text-green-400 mr-3">K: {player.kills}</span>
+      {/* Kill/Death + Coins */}
+      <div className="absolute top-4 right-6 font-body text-sm flex items-center gap-4">
+        <span className="text-primary">🪙 {earnedCoins}</span>
+        <span className="text-green-400">K: {player.kills}</span>
         <span className="text-red-400">D: {player.deaths}</span>
       </div>
 
@@ -316,23 +328,17 @@ function GameHUD({
           <h2 className="font-display font-black text-5xl text-red-500 mb-2">💀 ELIMINATED</h2>
           <p className="font-body text-muted-foreground mb-4">Respawning...</p>
           <div className="w-48 h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              className="h-full bg-accent rounded-full transition-all"
-              style={{ width: `${player.reloadProgress * 100}%` }}
-            />
+            <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${player.reloadProgress * 100}%` }} />
           </div>
         </div>
       )}
 
       {/* Exit button */}
-      <button
-        onClick={onExit}
-        className="absolute top-4 left-4 pointer-events-auto btn-attack text-xs px-3 py-1.5"
-      >
+      <button onClick={onExit} className="absolute top-4 left-4 pointer-events-auto btn-attack text-xs px-3 py-1.5">
         ✕ Exit
       </button>
 
-      {/* Click to play prompt */}
+      {/* Controls hint */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 font-body text-xs text-muted-foreground animate-pulse">
         Click to lock mouse • WASD move • Space jump • C crouch • Shift run • R reload • Mouse shoot
       </div>
@@ -341,7 +347,7 @@ function GameHUD({
 }
 
 // Main 3D Arena
-const CombatArena3D = ({ era, player: fighterData, onEnd }: CombatArena3DProps) => {
+const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena3DProps) => {
   const {
     player,
     enemies,
@@ -351,51 +357,69 @@ const CombatArena3D = ({ era, player: fighterData, onEnd }: CombatArena3DProps) 
     weapon,
     mapBlocks,
     mouseRotRef,
-  } = use3DGameEngine(era.id);
+    earnedCoins,
+  } = use3DGameEngine(era.id, economy);
 
   const eraId = era.id;
   const colors = ERA_COLORS[eraId as keyof typeof ERA_COLORS] || ERA_COLORS.ancient;
   const isFuture = eraId === "future";
+  const isModern = eraId === "modern";
 
   const handleExit = useCallback(() => {
     document.exitPointerLock();
-    onEnd(player.kills > player.deaths);
-  }, [onEnd, player.kills, player.deaths]);
+    onEnd(player.kills > player.deaths, earnedCoins);
+  }, [onEnd, player.kills, player.deaths, earnedCoins]);
 
   return (
     <div className="relative w-full h-screen overflow-hidden">
-      {/* Damage flash overlay */}
       {damageFlash && (
         <div className="absolute inset-0 z-30 pointer-events-none bg-red-500/30" />
       )}
 
-      <GameHUD player={player} weapon={weapon} killFeed={killFeed} eraId={eraId} onExit={handleExit} />
+      <GameHUD player={player} weapon={weapon} killFeed={killFeed} eraId={eraId} earnedCoins={earnedCoins} onExit={handleExit} />
 
       <Canvas
         shadows
         camera={{ fov: 70, near: 0.1, far: 200 }}
         style={{ background: colors.sky }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
       >
-        {/* Lighting */}
-        <ambientLight intensity={isFuture ? 0.3 : 0.5} color={colors.ambient} />
+        {/* Enhanced lighting */}
+        <ambientLight intensity={isFuture ? 0.2 : isModern ? 0.4 : 0.5} color={colors.ambient} />
         <directionalLight
           position={[20, 30, 10]}
-          intensity={isFuture ? 0.5 : 1.2}
+          intensity={isFuture ? 0.4 : isModern ? 1.0 : 1.2}
           castShadow
-          shadow-mapSize-width={1024}
-          shadow-mapSize-height={1024}
-          shadow-camera-far={80}
-          shadow-camera-left={-25}
-          shadow-camera-right={25}
-          shadow-camera-top={25}
-          shadow-camera-bottom={-25}
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+          shadow-camera-far={100}
+          shadow-camera-left={-30}
+          shadow-camera-right={30}
+          shadow-camera-top={30}
+          shadow-camera-bottom={-30}
+          shadow-bias={-0.001}
         />
-        {isFuture && <pointLight position={[0, 10, 0]} color="#00bcd4" intensity={2} distance={30} />}
+        {/* Era-specific accent lights */}
+        {isFuture && (
+          <>
+            <pointLight position={[0, 12, 0]} color="#00bcd4" intensity={3} distance={40} />
+            <pointLight position={[-15, 5, -15]} color="#e91e63" intensity={1.5} distance={20} />
+            <pointLight position={[15, 5, 15]} color="#7c4dff" intensity={1.5} distance={20} />
+          </>
+        )}
+        {isModern && <hemisphereLight color="#87ceeb" groundColor="#3a5f0b" intensity={0.3} />}
 
-        {/* Sky */}
-        {!isFuture && <Sky sunPosition={[100, 20, 100]} turbidity={eraId === "ancient" ? 2 : 8} />}
+        {/* Sky & atmosphere */}
+        {isFuture ? (
+          <Stars radius={100} depth={50} count={3000} factor={3} fade speed={1} />
+        ) : (
+          <Sky
+            sunPosition={isModern ? [50, 30, 50] : [100, 20, 100]}
+            turbidity={eraId === "ancient" ? 2 : isModern ? 4 : 8}
+            rayleigh={isModern ? 1.5 : 1}
+          />
+        )}
 
-        {/* Camera controller */}
         <CameraController playerPos={player.position} mouseRotRef={mouseRotRef} isDead={player.isDead} />
 
         {/* Map blocks */}
@@ -403,7 +427,7 @@ const CombatArena3D = ({ era, player: fighterData, onEnd }: CombatArena3DProps) 
           <MapBlockMesh key={i} block={block} eraId={eraId} />
         ))}
 
-        {/* Player character */}
+        {/* Player */}
         <VoxelCharacter
           position={player.position}
           rotation={player.rotation}
@@ -416,18 +440,19 @@ const CombatArena3D = ({ era, player: fighterData, onEnd }: CombatArena3DProps) 
           name={fighterData.name}
         />
 
-        {/* Enemies */}
+        {/* Enemies with archetype info */}
         {enemies.map((e) => (
           <VoxelCharacter
             key={e.id}
             position={e.position}
             rotation={e.rotation}
-            color={eraId === "future" ? "#e91e63" : eraId === "medieval" ? "#8b0000" : "#b8860b"}
+            color={e.color}
             isCrouching={false}
             hp={e.hp}
             maxHp={e.maxHp}
             isDead={e.isDead}
-            name={`Bot ${e.id + 1}`}
+            name={`${e.archetypeName} ${e.id + 1}`}
+            emoji={e.archetypeEmoji}
           />
         ))}
 
@@ -436,8 +461,8 @@ const CombatArena3D = ({ era, player: fighterData, onEnd }: CombatArena3DProps) 
           <ProjectileMesh key={p.id} proj={p} eraId={eraId} />
         ))}
 
-        {/* Fog for atmosphere */}
-        <fog attach="fog" color={colors.sky} near={30} far={isFuture ? 50 : 80} />
+        {/* Enhanced fog */}
+        <fog attach="fog" color={colors.sky} near={isFuture ? 20 : 35} far={isFuture ? 45 : 90} />
       </Canvas>
     </div>
   );
