@@ -4,9 +4,11 @@ import EraSelect from "@/components/EraSelect";
 import FighterSelect from "@/components/FighterSelect";
 import CombatArena3D from "@/components/CombatArena3D";
 import HistoryFactScreen from "@/components/HistoryFactScreen";
+import ShopScreen from "@/components/ShopScreen";
+import { PlayerEconomy, createEconomy, addCoins } from "@/game/economySystem";
 import heroBg from "@/assets/hero-bg.jpg";
 
-type Screen = "home" | "era" | "fighter" | "combat" | "fact";
+type Screen = "home" | "era" | "fighter" | "shop" | "combat" | "fact";
 
 const Index = () => {
   const [screen, setScreen] = useState<Screen>("home");
@@ -14,6 +16,7 @@ const Index = () => {
   const [selectedFighter, setSelectedFighter] = useState<Fighter | null>(null);
   const [lastWon, setLastWon] = useState(false);
   const [combatKey, setCombatKey] = useState(0);
+  const [economy, setEconomy] = useState<PlayerEconomy>(createEconomy);
 
   const randomFact = useMemo(() => {
     if (!selectedEra) return null;
@@ -28,18 +31,22 @@ const Index = () => {
 
   const handleFighterSelect = (fighter: Fighter) => {
     setSelectedFighter(fighter);
-    setCombatKey((k) => k + 1);
-    setScreen("combat");
+    setScreen("shop");
   };
 
-  const handleCombatEnd = useCallback((won: boolean) => {
+  const handleStartBattle = useCallback(() => {
+    setCombatKey((k) => k + 1);
+    setScreen("combat");
+  }, []);
+
+  const handleCombatEnd = useCallback((won: boolean, earnedCoins: number) => {
     setLastWon(won);
+    setEconomy(prev => addCoins(prev, earnedCoins + (won ? 200 : 0)));
     setScreen("fact");
   }, []);
 
   const handleFightAgain = useCallback(() => {
-    setCombatKey((k) => k + 1);
-    setScreen("combat");
+    setScreen("shop");
   }, []);
 
   const handleNewBattle = useCallback(() => {
@@ -48,12 +55,25 @@ const Index = () => {
     setSelectedEra(null);
   }, []);
 
+  if (screen === "shop" && selectedEra && selectedFighter) {
+    return (
+      <ShopScreen
+        era={selectedEra}
+        economy={economy}
+        onPurchase={setEconomy}
+        onStartBattle={handleStartBattle}
+        onBack={() => setScreen("fighter")}
+      />
+    );
+  }
+
   if (screen === "combat" && selectedEra && selectedFighter) {
     return (
       <CombatArena3D
         key={combatKey}
         era={selectedEra}
         player={selectedFighter}
+        economy={economy}
         onEnd={handleCombatEnd}
       />
     );
@@ -91,9 +111,12 @@ const Index = () => {
             <p className="text-lg md:text-xl text-muted-foreground max-w-lg mb-2 font-body">
               Fight through history. Learn from the past.
             </p>
-            <p className="text-sm text-muted-foreground mb-8">
-              Real-time 2D combat with warriors from every era. Move, jump, attack, and discover historical truths.
+            <p className="text-sm text-muted-foreground mb-4">
+              3D combat across 4 eras • Smart AI bots • Earn coins • Buy upgrades
             </p>
+            {economy.totalEarned > 0 && (
+              <p className="text-sm text-primary font-display mb-4">🪙 {economy.coins} coins available</p>
+            )}
             <button
               onClick={() => setScreen("era")}
               className="btn-gold text-lg animate-pulse-glow"
@@ -101,18 +124,22 @@ const Index = () => {
               ⚔️ Enter the Arena
             </button>
 
-            <div className="mt-8 grid grid-cols-3 gap-4 text-center max-w-sm">
+            <div className="mt-8 grid grid-cols-4 gap-3 text-center max-w-md">
               <div className="card-battle p-3">
                 <div className="text-2xl mb-1">🎮</div>
-                <p className="text-xs text-muted-foreground">Real-time 2D Combat</p>
+                <p className="text-xs text-muted-foreground">3D Combat</p>
+              </div>
+              <div className="card-battle p-3">
+                <div className="text-2xl mb-1">🤖</div>
+                <p className="text-xs text-muted-foreground">Smart AI</p>
+              </div>
+              <div className="card-battle p-3">
+                <div className="text-2xl mb-1">🪙</div>
+                <p className="text-xs text-muted-foreground">Economy</p>
               </div>
               <div className="card-battle p-3">
                 <div className="text-2xl mb-1">📜</div>
-                <p className="text-xs text-muted-foreground">Learn History</p>
-              </div>
-              <div className="card-battle p-3">
-                <div className="text-2xl mb-1">⚔️</div>
-                <p className="text-xs text-muted-foreground">Cross-Era Fights</p>
+                <p className="text-xs text-muted-foreground">History</p>
               </div>
             </div>
           </div>

@@ -1,17 +1,17 @@
 import { useRef, useCallback, useState, useEffect } from "react";
 import { PlayerState, EnemyState, Projectile, Weapon, ERA_WEAPONS, Vec3 } from "./types3d";
 import { generateMap, SPAWN_POINTS, PLAYER_SPAWN } from "./mapData";
+import { BotArchetype, getRandomArchetype, randomizePersonality } from "./botArchetypes";
+import { PlayerEconomy, KILL_REWARD, SHOP_ITEMS, addCoins } from "./economySystem";
 
 const GRAVITY = -20;
 const JUMP_FORCE = 8;
 const MOVE_SPEED = 8;
 const RUN_MULTIPLIER = 1.5;
 const CROUCH_MULTIPLIER = 0.5;
-const PLAYER_HEIGHT = 1.8;
-const CROUCH_HEIGHT = 1.0;
-const ENEMY_COUNT = 3;
+const ENEMY_COUNT = 5;
 const RESPAWN_TIME = 5;
-const MAP_BOUNDS = 19;
+const MAP_BOUNDS = 23;
 
 interface Keys {
   forward: boolean;
@@ -32,34 +32,54 @@ function dist3d(a: Vec3, b: Vec3) {
 }
 
 function createEnemy(id: number, spawn: Vec3): EnemyState {
+  const arch = getRandomArchetype();
+  const personality = randomizePersonality(arch.personality);
   return {
     id,
     position: { ...spawn },
     velocity: { x: 0, y: 0, z: 0 },
     rotation: Math.random() * Math.PI * 2,
-    hp: 100,
-    maxHp: 100,
+    hp: arch.maxHp,
+    maxHp: arch.maxHp,
     isDead: false,
     respawnTimer: 0,
     aiState: "patrol",
-    targetPoint: { x: (Math.random() - 0.5) * 30, y: 0.5, z: (Math.random() - 0.5) * 30 },
+    targetPoint: { x: (Math.random() - 0.5) * 40, y: 0.5, z: (Math.random() - 0.5) * 40 },
     lastFireTime: 0,
     ammo: 10,
+    archetypeId: arch.id,
+    archetypeName: arch.name,
+    archetypeEmoji: arch.emoji,
+    personality,
+    behavior: arch.behavior,
+    speed: arch.speed,
+    fireInterval: arch.fireInterval,
+    damage: arch.damage,
+    color: arch.color,
   };
 }
 
-export function use3DGameEngine(eraId: string) {
+export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
   const weapon = ERA_WEAPONS[eraId] || ERA_WEAPONS.ancient;
+
+  // Apply shop upgrades to weapon
+  const appliedWeapon = applyUpgrades(weapon, economy);
+
   const mapBlocks = useRef(generateMap());
+
+  // Calculate HP with armor upgrades
+  const baseHp = 150;
+  const bonusHp = economy ? getBonusHp(economy) : 0;
+  const totalHp = baseHp + bonusHp;
 
   const [player, setPlayer] = useState<PlayerState>(() => ({
     position: { ...PLAYER_SPAWN },
     velocity: { x: 0, y: 0, z: 0 },
     rotation: 0,
-    hp: 150,
-    maxHp: 150,
-    ammo: weapon.magSize,
-    maxAmmo: weapon.magSize,
+    hp: totalHp,
+    maxHp: totalHp,
+    ammo: appliedWeapon.magSize,
+    maxAmmo: appliedWeapon.magSize,
     isReloading: false,
     reloadProgress: 0,
     isCrouching: false,
@@ -78,6 +98,7 @@ export function use3DGameEngine(eraId: string) {
   const [projectiles, setProjectiles] = useState<Projectile[]>([]);
   const [damageFlash, setDamageFlash] = useState(false);
   const [killFeed, setKillFeed] = useState<string[]>([]);
+  const [earnedCoins, setEarnedCoins] = useState(0);
 
   const keysRef = useRef<Keys>({
     forward: false, backward: false, left: false, right: false,
@@ -91,6 +112,10 @@ export function use3DGameEngine(eraId: string) {
   playerRef.current = player;
   enemiesRef.current = enemies;
   projectilesRef.current = projectiles;
+
+  // Check if regen purchased
+  const hasRegen = economy?.purchases.includes("regen_1") ?? false;
+  const speedMultiplier = economy?.purchases.includes("speed_1") ? 1.2 : 1;
 
   // Input handlers
   useEffect(() => {
@@ -149,13 +174,24 @@ export function use3DGameEngine(eraId: string) {
 
       const keys = keysRef.current;
       const p = { ...playerRef.current };
-      const ens = enemiesRef.current.map(e => ({ ...e, position: { ...e.position }, velocity: { ...e.velocity }, targetPoint: { ...e.targetPoint } }));
+      const ens = enemiesRef.current.map(e => ({
+        ...e,
+        position: { ...e.position },
+        velocity: { ...e.velocity },
+        targetPoint: { ...e.targetPoint },
+        personality: { ...e.personality },
+      }));
       let projs = projectilesRef.current.map(pr => ({ ...pr, position: { ...pr.position }, velocity: { ...pr.velocity } }));
 
       if (!p.isDead) {
+        // Health regen
+        if (hasRegen && p.hp < p.maxHp) {
+          p.hp = Math.min(p.maxHp, p.hp + 2 * dt);
+        }
+
         // Player movement
         const yaw = mouseRotRef.current.yaw;
-        let speed = MOVE_SPEED;
+        let speed = MOVE_SPEED * speedMultiplier;
         p.isCrouching = keys.crouch;
         p.isRunning = keys.run && !keys.crouch;
         if (p.isCrouching) speed *= CROUCH_MULTIPLIER;
@@ -198,7 +234,7 @@ export function use3DGameEngine(eraId: string) {
         p.position.x = clamp(p.position.x, -MAP_BOUNDS, MAP_BOUNDS);
         p.position.z = clamp(p.position.z, -MAP_BOUNDS, MAP_BOUNDS);
 
-        // Simple block collision
+        // Block collision
         for (const block of mapBlocks.current) {
           if (block.type === "ground") continue;
           const bx = block.position.x, bz = block.position.z;
@@ -207,13 +243,11 @@ export function use3DGameEngine(eraId: string) {
 
           if (p.position.x > bx - hw - 0.3 && p.position.x < bx + hw + 0.3 &&
               p.position.z > bz - hd - 0.3 && p.position.z < bz + hd + 0.3) {
-            // On top of block
             if (p.position.y >= bTop - 0.3 && p.velocity.y <= 0) {
               p.position.y = bTop + 0.5;
               p.velocity.y = 0;
               p.isGrounded = true;
             } else if (p.position.y < bTop - 0.3) {
-              // Push out horizontally
               const dx = p.position.x - bx;
               const dz = p.position.z - bz;
               if (Math.abs(dx) / hw > Math.abs(dz) / hd) {
@@ -229,21 +263,21 @@ export function use3DGameEngine(eraId: string) {
 
         // Reloading
         if (p.isReloading) {
-          p.reloadProgress += dt / weapon.reloadTime;
+          p.reloadProgress += dt / appliedWeapon.reloadTime;
           if (p.reloadProgress >= 1) {
-            p.ammo = weapon.magSize;
+            p.ammo = appliedWeapon.magSize;
             p.isReloading = false;
             p.reloadProgress = 0;
           }
         }
 
-        if (keys.reload && !p.isReloading && p.ammo < weapon.magSize) {
+        if (keys.reload && !p.isReloading && p.ammo < appliedWeapon.magSize) {
           p.isReloading = true;
           p.reloadProgress = 0;
         }
 
         // Firing
-        const fireInterval = 1 / weapon.fireRate;
+        const fireInterval = 1 / appliedWeapon.fireRate;
         if (keys.fire && !p.isReloading && p.ammo > 0 && now / 1000 - p.lastFireTime > fireInterval) {
           p.lastFireTime = now / 1000;
           p.ammo--;
@@ -258,8 +292,8 @@ export function use3DGameEngine(eraId: string) {
           projs.push({
             id: projectileIdRef.current++,
             position: { x: p.position.x, y: p.position.y + 1, z: p.position.z },
-            velocity: { x: dir.x * weapon.projectileSpeed, y: dir.y * weapon.projectileSpeed, z: dir.z * weapon.projectileSpeed },
-            damage: weapon.damage,
+            velocity: { x: dir.x * appliedWeapon.projectileSpeed, y: dir.y * appliedWeapon.projectileSpeed, z: dir.z * appliedWeapon.projectileSpeed },
+            damage: appliedWeapon.damage,
             ownerId: "player",
             lifetime: 3,
           });
@@ -275,7 +309,7 @@ export function use3DGameEngine(eraId: string) {
         if (p.reloadProgress >= 1) {
           p.isDead = false;
           p.hp = p.maxHp;
-          p.ammo = weapon.magSize;
+          p.ammo = appliedWeapon.magSize;
           p.isReloading = false;
           p.reloadProgress = 0;
           p.position = { ...PLAYER_SPAWN };
@@ -283,7 +317,7 @@ export function use3DGameEngine(eraId: string) {
         }
       }
 
-      // Update enemies
+      // Update enemies with smart AI
       for (const e of ens) {
         if (e.isDead) {
           e.respawnTimer -= dt;
@@ -299,25 +333,35 @@ export function use3DGameEngine(eraId: string) {
         }
 
         const distToPlayer = dist3d(e.position, p.position);
+        const detectRange = 25 * e.personality.awareness;
+        const hpRatio = e.hp / e.maxHp;
 
-        // AI state machine
+        // Smart AI state machine based on archetype
         if (p.isDead) {
           e.aiState = "patrol";
-        } else if (distToPlayer < 6) {
-          e.aiState = "attack";
-        } else if (distToPlayer < 20) {
-          e.aiState = "chase";
+        } else if (hpRatio < (1 - e.personality.courage) && distToPlayer < 15) {
+          e.aiState = "flee";
+        } else if (e.behavior === "rush" && distToPlayer < detectRange) {
+          e.aiState = distToPlayer < 5 ? "attack" : "chase";
+        } else if (e.behavior === "snipe" && distToPlayer < detectRange) {
+          e.aiState = distToPlayer < 8 ? "flee" : "attack";
+        } else if (e.behavior === "defend" && distToPlayer < detectRange) {
+          e.aiState = distToPlayer < 12 ? "attack" : "patrol";
+        } else if (e.behavior === "flank" && distToPlayer < detectRange) {
+          e.aiState = distToPlayer < 10 ? "flank" : "chase";
+        } else if (distToPlayer < detectRange) {
+          e.aiState = distToPlayer < 8 ? "attack" : "chase";
         } else {
           e.aiState = "patrol";
         }
 
-        const eSpeed = 4;
+        const eSpeed = e.speed;
         switch (e.aiState) {
           case "patrol": {
             const toTarget = { x: e.targetPoint.x - e.position.x, z: e.targetPoint.z - e.position.z };
             const tDist = Math.sqrt(toTarget.x ** 2 + toTarget.z ** 2);
             if (tDist < 1) {
-              e.targetPoint = { x: (Math.random() - 0.5) * 30, y: 0.5, z: (Math.random() - 0.5) * 30 };
+              e.targetPoint = { x: (Math.random() - 0.5) * 40, y: 0.5, z: (Math.random() - 0.5) * 40 };
             } else {
               e.velocity.x = (toTarget.x / tDist) * eSpeed * 0.5;
               e.velocity.z = (toTarget.z / tDist) * eSpeed * 0.5;
@@ -335,37 +379,73 @@ export function use3DGameEngine(eraId: string) {
             e.rotation = Math.atan2(toPlayer.x, toPlayer.z);
             break;
           }
+          case "flank": {
+            // Move perpendicular to player direction
+            const toPlayer = { x: p.position.x - e.position.x, z: p.position.z - e.position.z };
+            const cDist = Math.sqrt(toPlayer.x ** 2 + toPlayer.z ** 2);
+            const perpX = -toPlayer.z / cDist;
+            const perpZ = toPlayer.x / cDist;
+            const flankDir = (e.id % 2 === 0) ? 1 : -1;
+            const blendToward = 0.3;
+            e.velocity.x = (perpX * flankDir * (1 - blendToward) + toPlayer.x / cDist * blendToward) * eSpeed;
+            e.velocity.z = (perpZ * flankDir * (1 - blendToward) + toPlayer.z / cDist * blendToward) * eSpeed;
+            e.rotation = Math.atan2(toPlayer.x, toPlayer.z);
+            break;
+          }
+          case "flee": {
+            const awayX = e.position.x - p.position.x;
+            const awayZ = e.position.z - p.position.z;
+            const aDist = Math.sqrt(awayX ** 2 + awayZ ** 2);
+            if (aDist > 0) {
+              e.velocity.x = (awayX / aDist) * eSpeed * 1.2;
+              e.velocity.z = (awayZ / aDist) * eSpeed * 1.2;
+            }
+            e.rotation = Math.atan2(-awayX, -awayZ);
+            break;
+          }
           case "attack": {
             const toPlayer = { x: p.position.x - e.position.x, z: p.position.z - e.position.z };
             const aDist = Math.sqrt(toPlayer.x ** 2 + toPlayer.z ** 2);
             e.rotation = Math.atan2(toPlayer.x, toPlayer.z);
-            e.velocity.x = 0;
-            e.velocity.z = 0;
 
-            // Strafe
-            if (Math.random() < 0.02) {
-              const strafe = Math.random() > 0.5 ? 1 : -1;
-              e.velocity.x = Math.sin(e.rotation + Math.PI / 2) * eSpeed * 0.5 * strafe;
-              e.velocity.z = Math.cos(e.rotation + Math.PI / 2) * eSpeed * 0.5 * strafe;
+            // Behavior-specific movement during attack
+            if (e.behavior === "rush") {
+              // Rushers keep pushing forward
+              if (aDist > 3) {
+                e.velocity.x = (toPlayer.x / aDist) * eSpeed * 0.8;
+                e.velocity.z = (toPlayer.z / aDist) * eSpeed * 0.8;
+              } else {
+                e.velocity.x = 0; e.velocity.z = 0;
+              }
+            } else if (e.behavior === "snipe") {
+              // Snipers stay still
+              e.velocity.x = 0; e.velocity.z = 0;
+            } else {
+              // Default: strafe
+              e.velocity.x = 0; e.velocity.z = 0;
+              if (Math.random() < 0.03) {
+                const strafe = Math.random() > 0.5 ? 1 : -1;
+                e.velocity.x = Math.sin(e.rotation + Math.PI / 2) * eSpeed * 0.5 * strafe;
+                e.velocity.z = Math.cos(e.rotation + Math.PI / 2) * eSpeed * 0.5 * strafe;
+              }
             }
 
-            // Shoot
-            if (now / 1000 - e.lastFireTime > 2.5 && e.ammo > 0) {
+            // Shoot with archetype-specific interval and accuracy
+            if (now / 1000 - e.lastFireTime > e.fireInterval && e.ammo > 0) {
               e.lastFireTime = now / 1000;
               e.ammo--;
               if (aDist > 0) {
                 const dir = { x: toPlayer.x / aDist, y: (p.position.y + 0.8 - e.position.y - 0.8) / aDist, z: toPlayer.z / aDist };
-                // Add inaccuracy
-                const acc = 0.3;
+                const acc = 0.5 * (1 - e.personality.accuracy); // Higher accuracy = lower spread
                 projs.push({
                   id: projectileIdRef.current++,
                   position: { x: e.position.x, y: e.position.y + 1, z: e.position.z },
                   velocity: {
-                    x: (dir.x + (Math.random() - 0.5) * acc) * 15,
-                    y: (dir.y + (Math.random() - 0.5) * acc) * 15,
-                    z: (dir.z + (Math.random() - 0.5) * acc) * 15,
+                    x: (dir.x + (Math.random() - 0.5) * acc) * 18,
+                    y: (dir.y + (Math.random() - 0.5) * acc) * 18,
+                    z: (dir.z + (Math.random() - 0.5) * acc) * 18,
                   },
-                  damage: 6,
+                  damage: e.damage,
                   ownerId: e.id,
                   lifetime: 3,
                 });
@@ -402,11 +482,9 @@ export function use3DGameEngine(eraId: string) {
           continue;
         }
 
-        // Hit detection
         let hit = false;
 
         if (pr.ownerId === "player") {
-          // Check enemy hits
           for (const e of ens) {
             if (e.isDead) continue;
             if (dist3d(pr.position, { x: e.position.x, y: e.position.y + 0.8, z: e.position.z }) < 1) {
@@ -415,14 +493,14 @@ export function use3DGameEngine(eraId: string) {
                 e.isDead = true;
                 e.respawnTimer = RESPAWN_TIME;
                 p.kills++;
-                addKillFeed(`You eliminated Bot ${e.id + 1}`);
+                setEarnedCoins(prev => prev + KILL_REWARD);
+                addKillFeed(`You eliminated ${e.archetypeEmoji} ${e.archetypeName} ${e.id + 1} (+${KILL_REWARD}🪙)`);
               }
               hit = true;
               break;
             }
           }
         } else {
-          // Check player hit
           if (!p.isDead && dist3d(pr.position, { x: p.position.x, y: p.position.y + 0.8, z: p.position.z }) < 0.8) {
             p.hp -= pr.damage;
             setDamageFlash(true);
@@ -431,13 +509,13 @@ export function use3DGameEngine(eraId: string) {
               p.isDead = true;
               p.deaths++;
               p.reloadProgress = 0;
-              addKillFeed(`Bot ${(pr.ownerId as number) + 1} eliminated you`);
+              const killer = ens.find(e => e.id === pr.ownerId);
+              addKillFeed(`${killer?.archetypeEmoji || "🤖"} ${killer?.archetypeName || "Bot"} eliminated you`);
             }
             hit = true;
           }
         }
 
-        // Block collision
         if (!hit) {
           for (const block of mapBlocks.current) {
             if (block.type === "ground") continue;
@@ -464,7 +542,7 @@ export function use3DGameEngine(eraId: string) {
 
     const animRef = { current: requestAnimationFrame(loop) };
     return () => cancelAnimationFrame(animRef.current);
-  }, [weapon, addKillFeed]);
+  }, [appliedWeapon, addKillFeed, hasRegen, speedMultiplier]);
 
   return {
     player,
@@ -472,9 +550,36 @@ export function use3DGameEngine(eraId: string) {
     projectiles,
     damageFlash,
     killFeed,
-    weapon,
+    weapon: appliedWeapon,
     mapBlocks: mapBlocks.current,
     mouseRotRef,
     keysRef,
+    earnedCoins,
   };
+}
+
+// Apply shop upgrades
+function applyUpgrades(weapon: Weapon, economy?: PlayerEconomy): Weapon {
+  if (!economy) return weapon;
+  let w = { ...weapon };
+  for (const pid of economy.purchases) {
+    const item = SHOP_ITEMS.find(i => i.id === pid);
+    if (!item) continue;
+    switch (item.stat) {
+      case "damage": w.damage = Math.round(w.damage * item.value); break;
+      case "fireRate": w.fireRate *= item.value; break;
+      case "magSize": w.magSize = Math.round(w.magSize * item.value); break;
+      case "reloadSpeed": w.reloadTime *= item.value; break;
+    }
+  }
+  return w;
+}
+
+function getBonusHp(economy: PlayerEconomy): number {
+  let bonus = 0;
+  for (const pid of economy.purchases) {
+    const item = SHOP_ITEMS.find(i => i.id === pid);
+    if (item && item.stat === "hp") bonus += item.value;
+  }
+  return bonus;
 }
