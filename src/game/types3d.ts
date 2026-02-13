@@ -128,3 +128,10 @@ export interface MapBlock {
   color: string;
   type: "ground" | "wall" | "cover" | "platform";
 }
+
+export type CameraMode = "fpv" | "tpv";
+
+export interface LockOnTarget {
+  enemyId: number;
+  position: Vec3;
+}

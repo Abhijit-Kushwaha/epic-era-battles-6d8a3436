@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { Era, Fighter } from "@/game/gameData";
 import { use3DGameEngine } from "@/game/use3DGameEngine";
 import { ERA_COLORS } from "@/game/mapData";
-import { MapBlock, EnemyState, Projectile, PlayerState } from "@/game/types3d";
+import { MapBlock, EnemyState, Projectile, PlayerState, CameraMode, LockOnTarget } from "@/game/types3d";
 import { PlayerEconomy } from "@/game/economySystem";
 import Minimap from "./Minimap";
 import NightVision from "./NightVision";
@@ -18,18 +18,30 @@ interface CombatArena3DProps {
   onEnd: (won: boolean, earnedCoins: number) => void;
 }
 
-// Camera controller
+// Camera controller with FPV/TPV modes
 function CameraController({
   playerPos,
   mouseRotRef,
   isDead,
+  cameraMode,
+  isMoving,
+  isRunning,
+  lockOnTarget,
+  mapBlocks,
 }: {
   playerPos: { x: number; y: number; z: number };
   mouseRotRef: React.MutableRefObject<{ yaw: number; pitch: number }>;
   isDead: boolean;
+  cameraMode: CameraMode;
+  isMoving: boolean;
+  isRunning: boolean;
+  lockOnTarget: LockOnTarget | null;
+  mapBlocks: MapBlock[];
 }) {
   const { camera, gl } = useThree();
   const isLocked = useRef(false);
+  const headBobPhase = useRef(0);
+  const transitionProgress = useRef(cameraMode === "fpv" ? 1 : 0);
 
   useEffect(() => {
     const canvas = gl.domElement;
@@ -59,20 +71,176 @@ function CameraController({
     };
   }, [gl, mouseRotRef]);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const { yaw, pitch } = mouseRotRef.current;
-    const dist = isDead ? 8 : 5;
-    const height = isDead ? 4 : 2.5;
 
-    const camX = playerPos.x - Math.sin(yaw) * Math.cos(pitch) * dist;
-    const camY = playerPos.y + height - Math.sin(pitch) * dist * 0.3;
-    const camZ = playerPos.z - Math.cos(yaw) * Math.cos(pitch) * dist;
+    // Smooth transition between modes (0 = TPV, 1 = FPV)
+    const targetT = cameraMode === "fpv" ? 1 : 0;
+    transitionProgress.current += (targetT - transitionProgress.current) * Math.min(1, delta * 5);
+    const t = transitionProgress.current;
+
+    // Head bob for FPV
+    let bobX = 0, bobY = 0;
+    if (isMoving && !isDead) {
+      const bobSpeed = isRunning ? 14 : 9;
+      const bobAmount = isRunning ? 0.06 : 0.03;
+      headBobPhase.current += delta * bobSpeed;
+      bobY = Math.sin(headBobPhase.current) * bobAmount;
+      bobX = Math.cos(headBobPhase.current * 0.5) * bobAmount * 0.5;
+    } else {
+      headBobPhase.current *= 0.9;
+    }
+
+    // Lock-on: slightly adjust yaw/pitch toward target
+    let effectiveYaw = yaw;
+    let effectivePitch = pitch;
+    if (lockOnTarget) {
+      const dx = lockOnTarget.position.x - playerPos.x;
+      const dz = lockOnTarget.position.z - playerPos.z;
+      const dy = (lockOnTarget.position.y + 1) - (playerPos.y + 1.6);
+      const targetYaw = Math.atan2(dx, dz);
+      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+      const targetPitch = Math.atan2(dy, horizontalDist);
+      // Soft aim assist: blend 30% toward target
+      effectiveYaw += (targetYaw - effectiveYaw) * 0.3;
+      effectivePitch += (targetPitch - effectivePitch) * 0.3;
+    }
+
+    // FPV camera: at player head
+    const fpvX = playerPos.x + bobX;
+    const fpvY = playerPos.y + 1.6 + bobY;
+    const fpvZ = playerPos.z;
+
+    // TPV camera: behind player with collision
+    const tpvDist = isDead ? 8 : 5;
+    const tpvHeight = isDead ? 4 : 2.5;
+    let tpvX = playerPos.x - Math.sin(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+    let tpvY = playerPos.y + tpvHeight - Math.sin(effectivePitch) * tpvDist * 0.3;
+    let tpvZ = playerPos.z - Math.cos(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+
+    // Simple wall collision for TPV: raycast from player to camera
+    const origin = new THREE.Vector3(playerPos.x, playerPos.y + 1.5, playerPos.z);
+    const camDir = new THREE.Vector3(tpvX - origin.x, tpvY - origin.y, tpvZ - origin.z);
+    const maxDist = camDir.length();
+    camDir.normalize();
+    let minClipDist = maxDist;
+    for (const block of mapBlocks) {
+      if (block.type === "ground") continue;
+      const bMin = new THREE.Vector3(
+        block.position.x - block.size.x / 2,
+        block.position.y - block.size.y / 2,
+        block.position.z - block.size.z / 2
+      );
+      const bMax = new THREE.Vector3(
+        block.position.x + block.size.x / 2,
+        block.position.y + block.size.y / 2,
+        block.position.z + block.size.z / 2
+      );
+      const box = new THREE.Box3(bMin, bMax);
+      const ray = new THREE.Ray(origin, camDir);
+      const hitPoint = new THREE.Vector3();
+      if (ray.intersectBox(box, hitPoint)) {
+        const hitDist = origin.distanceTo(hitPoint);
+        if (hitDist < minClipDist) minClipDist = hitDist - 0.3;
+      }
+    }
+    if (minClipDist < maxDist && minClipDist > 0.5) {
+      tpvX = origin.x + camDir.x * minClipDist;
+      tpvY = origin.y + camDir.y * minClipDist;
+      tpvZ = origin.z + camDir.z * minClipDist;
+    }
+
+    // Lerp between FPV and TPV
+    const camX = fpvX * t + tpvX * (1 - t);
+    const camY = fpvY * t + tpvY * (1 - t);
+    const camZ = fpvZ * t + tpvZ * (1 - t);
+
+    const lookTarget = new THREE.Vector3(
+      playerPos.x + Math.sin(effectiveYaw) * 10,
+      playerPos.y + 1.6 + Math.sin(effectivePitch) * 5,
+      playerPos.z + Math.cos(effectiveYaw) * 10
+    );
+    const tpvLookTarget = new THREE.Vector3(playerPos.x, playerPos.y + 1, playerPos.z);
 
     camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.15);
-    camera.lookAt(playerPos.x, playerPos.y + 1, playerPos.z);
+    const finalLook = new THREE.Vector3().lerpVectors(tpvLookTarget, lookTarget, t);
+    camera.lookAt(finalLook);
+
+    // Adjust FOV: FPV = 80, TPV = 70
+    const targetFov = 80 * t + 70 * (1 - t);
+    (camera as THREE.PerspectiveCamera).fov += (targetFov - (camera as THREE.PerspectiveCamera).fov) * 0.1;
+    (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
   });
 
   return null;
+}
+
+// FPS weapon visible in first person
+function FPSWeapon({ cameraMode, weapon, isReloading }: { cameraMode: CameraMode; weapon: { emoji: string }; isReloading: boolean }) {
+  const ref = useRef<THREE.Group>(null);
+  const { camera } = useThree();
+
+  useFrame(() => {
+    if (!ref.current) return;
+    // Attach weapon to camera
+    ref.current.position.copy(camera.position);
+    ref.current.quaternion.copy(camera.quaternion);
+    ref.current.translateX(0.3);
+    ref.current.translateY(-0.2);
+    ref.current.translateZ(-0.5);
+    // Reload animation
+    if (isReloading) {
+      ref.current.rotateX(Math.sin(Date.now() * 0.01) * 0.3);
+    }
+  });
+
+  if (cameraMode !== "fpv") return null;
+
+  return (
+    <group ref={ref}>
+      <mesh castShadow>
+        <boxGeometry args={[0.08, 0.08, 0.4]} />
+        <meshStandardMaterial color="#555" metalness={0.8} roughness={0.2} />
+      </mesh>
+      <mesh position={[0, -0.06, 0.05]}>
+        <boxGeometry args={[0.06, 0.12, 0.15]} />
+        <meshStandardMaterial color="#333" metalness={0.6} roughness={0.4} />
+      </mesh>
+    </group>
+  );
+}
+
+// Lock-on target indicator in 3D
+function LockOnIndicator({ target, enemies }: { target: LockOnTarget; enemies: EnemyState[] }) {
+  const ref = useRef<THREE.Group>(null);
+  const enemy = enemies.find(e => e.id === target.enemyId);
+  
+  useFrame(() => {
+    if (!ref.current || !enemy) return;
+    ref.current.position.set(enemy.position.x, enemy.position.y + 2.2, enemy.position.z);
+    ref.current.rotation.y += 0.03;
+  });
+
+  if (!enemy || enemy.isDead) return null;
+
+  return (
+    <group ref={ref}>
+      {/* Diamond reticle */}
+      <mesh rotation={[0, 0, Math.PI / 4]}>
+        <ringGeometry args={[0.3, 0.4, 4]} />
+        <meshBasicMaterial color="#ff2222" side={THREE.DoubleSide} transparent opacity={0.8} />
+      </mesh>
+      <mesh rotation={[Math.PI / 2, 0, Math.PI / 4]}>
+        <ringGeometry args={[0.3, 0.4, 4]} />
+        <meshBasicMaterial color="#ff2222" side={THREE.DoubleSide} transparent opacity={0.5} />
+      </mesh>
+      {/* Glow */}
+      <pointLight color="#ff2222" intensity={2} distance={5} />
+      <Text position={[0, 0.5, 0]} fontSize={0.15} color="#ff4444" anchorX="center">
+        🎯 LOCKED
+      </Text>
+    </group>
+  );
 }
 
 // Voxel character with archetype indicators
@@ -87,6 +255,8 @@ function VoxelCharacter({
   isDead,
   name,
   emoji,
+  hideInFPV,
+  isLockedOn,
 }: {
   position: { x: number; y: number; z: number };
   rotation: number;
@@ -98,6 +268,8 @@ function VoxelCharacter({
   isDead: boolean;
   name: string;
   emoji?: string;
+  hideInFPV?: boolean;
+  isLockedOn?: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
   const legLRef = useRef<THREE.Mesh>(null);
@@ -132,17 +304,18 @@ function VoxelCharacter({
     }
   });
 
-  if (isDead) return null;
+  if (isDead || hideInFPV) return null;
 
   const bodyH = isCrouching ? 0.4 : 0.6;
   const baseY = isCrouching ? -0.2 : 0;
+  const lockedGlow = isLockedOn ? 1.5 : 0;
 
   return (
     <group ref={groupRef}>
       {/* Head */}
       <mesh position={[0, bodyH + 0.65 + baseY, 0]} castShadow>
         <boxGeometry args={[0.5, 0.5, 0.5]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} emissive={isLockedOn ? "#ff0000" : "#000000"} emissiveIntensity={lockedGlow} />
       </mesh>
       {/* Eyes */}
       <mesh position={[0.12, bodyH + 0.7 + baseY, 0.26]}>
@@ -157,7 +330,7 @@ function VoxelCharacter({
       {/* Body */}
       <mesh position={[0, bodyH * 0.5 + 0.15 + baseY, 0]} castShadow>
         <boxGeometry args={[0.5, bodyH, 0.3]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} />
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0.1} emissive={isLockedOn ? "#ff0000" : "#000000"} emissiveIntensity={lockedGlow * 0.5} />
       </mesh>
 
       {/* Arms */}
@@ -228,7 +401,6 @@ function ProjectileMesh({ proj, eraId }: { proj: Projectile; eraId: string }) {
         <sphereGeometry args={[c.size, 8, 8]} />
         <meshStandardMaterial color={c.color} emissive={c.color} emissiveIntensity={c.intensity} />
       </mesh>
-      {/* Point light for glow effect */}
       <pointLight position={[proj.position.x, proj.position.y, proj.position.z]} color={c.color} intensity={0.5} distance={3} />
     </group>
   );
@@ -262,6 +434,8 @@ function GameHUD({
   nightVisionBattery,
   enemies,
   mapBlocks,
+  cameraMode,
+  lockOnTarget,
   onExit,
 }: {
   player: PlayerState;
@@ -273,6 +447,8 @@ function GameHUD({
   nightVisionBattery: number;
   enemies: EnemyState[];
   mapBlocks: MapBlock[];
+  cameraMode: CameraMode;
+  lockOnTarget: LockOnTarget | null;
   onExit: () => void;
 }) {
   return (
@@ -285,8 +461,13 @@ function GameHUD({
             <div className="absolute left-1/2 bottom-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
             <div className="absolute right-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
-            <div className="absolute left-1/2 top-1/2 w-1 h-1 rounded-full bg-red-500/60 -translate-x-1/2 -translate-y-1/2" />
+            <div className={`absolute left-1/2 top-1/2 w-1 h-1 rounded-full -translate-x-1/2 -translate-y-1/2 ${lockOnTarget ? "bg-red-500" : "bg-red-500/60"}`} />
           </div>
+          {lockOnTarget && (
+            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-red-400 text-[10px] font-display whitespace-nowrap">
+              🎯 LOCKED
+            </div>
+          )}
         </div>
       )}
 
@@ -333,8 +514,11 @@ function GameHUD({
         </div>
       </div>
 
-      {/* Kill/Death + Coins */}
+      {/* Kill/Death + Coins + Camera Mode */}
       <div className="absolute top-4 right-6 font-body text-sm flex items-center gap-4">
+        <span className="text-muted-foreground text-xs border border-border rounded px-1.5 py-0.5">
+          {cameraMode === "fpv" ? "👁 FPV" : "🎥 TPV"} [V]
+        </span>
         <span className="text-primary">🪙 {earnedCoins}</span>
         <span className="text-green-400">K: {player.kills}</span>
         <span className="text-red-400">D: {player.deaths}</span>
@@ -367,7 +551,7 @@ function GameHUD({
 
       {/* Controls hint */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 font-body text-xs text-muted-foreground animate-pulse">
-        Click to lock mouse • WASD move • Space jump • C crouch • Shift run • R reload • N night vision • Mouse shoot
+        WASD move • Space jump • C crouch • Shift run • R reload • N night vision • V camera • Q lock-on • Scroll switch target
       </div>
 
       {/* Minimap */}
@@ -388,6 +572,8 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
     mapBlocks,
     mouseRotRef,
     earnedCoins,
+    cameraMode,
+    lockOnTarget,
   } = use3DGameEngine(era.id, economy);
 
   const { active: nvActive, battery: nvBattery } = useNightVision();
@@ -396,6 +582,12 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
   const colors = ERA_COLORS[eraId as keyof typeof ERA_COLORS] || ERA_COLORS.ancient;
   const isFuture = eraId === "future";
   const isModern = eraId === "modern";
+
+  // Detect if player is moving
+  const prevPos = useRef(player.position);
+  const isMoving = Math.abs(player.position.x - prevPos.current.x) > 0.01 ||
+                   Math.abs(player.position.z - prevPos.current.z) > 0.01;
+  prevPos.current = player.position;
 
   const handleExit = useCallback(() => {
     document.exitPointerLock();
@@ -408,12 +600,17 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         <div className="absolute inset-0 z-30 pointer-events-none bg-red-500/30" />
       )}
 
-      <GameHUD player={player} weapon={weapon} killFeed={killFeed} eraId={eraId} earnedCoins={earnedCoins} nightVisionActive={nvActive} nightVisionBattery={nvBattery} enemies={enemies} mapBlocks={mapBlocks} onExit={handleExit} />
+      <GameHUD
+        player={player} weapon={weapon} killFeed={killFeed} eraId={eraId}
+        earnedCoins={earnedCoins} nightVisionActive={nvActive} nightVisionBattery={nvBattery}
+        enemies={enemies} mapBlocks={mapBlocks} cameraMode={cameraMode}
+        lockOnTarget={lockOnTarget} onExit={handleExit}
+      />
 
       <NightVision active={nvActive}>
         <Canvas
           shadows
-          camera={{ fov: 70, near: 0.1, far: 200 }}
+          camera={{ fov: 75, near: 0.1, far: 200 }}
           style={{ background: colors.sky }}
           gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
         >
@@ -432,7 +629,6 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           shadow-camera-bottom={-30}
           shadow-bias={-0.001}
         />
-        {/* Era-specific accent lights */}
         {isFuture && (
           <>
             <pointLight position={[0, 12, 0]} color="#00bcd4" intensity={3} distance={40} />
@@ -442,7 +638,6 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         )}
         {isModern && <hemisphereLight color="#87ceeb" groundColor="#3a5f0b" intensity={0.3} />}
 
-        {/* Sky & atmosphere */}
         {isFuture ? (
           <Stars radius={100} depth={50} count={3000} factor={3} fade speed={1} />
         ) : (
@@ -453,14 +648,29 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           />
         )}
 
-        <CameraController playerPos={player.position} mouseRotRef={mouseRotRef} isDead={player.isDead} />
+        <CameraController
+          playerPos={player.position}
+          mouseRotRef={mouseRotRef}
+          isDead={player.isDead}
+          cameraMode={cameraMode}
+          isMoving={isMoving}
+          isRunning={player.isRunning}
+          lockOnTarget={lockOnTarget}
+          mapBlocks={mapBlocks}
+        />
+
+        {/* FPS Weapon */}
+        <FPSWeapon cameraMode={cameraMode} weapon={weapon} isReloading={player.isReloading} />
+
+        {/* Lock-on indicator */}
+        {lockOnTarget && <LockOnIndicator target={lockOnTarget} enemies={enemies} />}
 
         {/* Map blocks */}
         {mapBlocks.map((block, i) => (
           <MapBlockMesh key={i} block={block} eraId={eraId} />
         ))}
 
-        {/* Player */}
+        {/* Player - hidden in FPV */}
         <VoxelCharacter
           position={player.position}
           rotation={player.rotation}
@@ -471,9 +681,10 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           maxHp={player.maxHp}
           isDead={player.isDead}
           name={fighterData.name}
+          hideInFPV={cameraMode === "fpv"}
         />
 
-        {/* Enemies with archetype info */}
+        {/* Enemies with lock-on glow */}
         {enemies.map((e) => (
           <VoxelCharacter
             key={e.id}
@@ -486,6 +697,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
             isDead={e.isDead}
             name={`${e.archetypeName} ${e.id + 1}`}
             emoji={e.archetypeEmoji}
+            isLockedOn={lockOnTarget?.enemyId === e.id}
           />
         ))}
 
@@ -494,7 +706,6 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           <ProjectileMesh key={p.id} proj={p} eraId={eraId} />
         ))}
 
-        {/* Enhanced fog */}
         <fog attach="fog" color={colors.sky} near={isFuture ? 20 : 35} far={isFuture ? 45 : 90} />
       </Canvas>
       </NightVision>

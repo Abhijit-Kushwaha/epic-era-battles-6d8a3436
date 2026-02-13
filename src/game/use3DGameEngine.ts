@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState, useEffect } from "react";
-import { PlayerState, EnemyState, Projectile, Weapon, ERA_WEAPONS, Vec3 } from "./types3d";
+import { PlayerState, EnemyState, Projectile, Weapon, ERA_WEAPONS, Vec3, CameraMode, LockOnTarget } from "./types3d";
 import { generateMap, SPAWN_POINTS, PLAYER_SPAWN } from "./mapData";
 import { BotArchetype, getRandomArchetype, randomizePersonality } from "./botArchetypes";
 import { PlayerEconomy, KILL_REWARD, SHOP_ITEMS, addCoins } from "./economySystem";
@@ -108,6 +108,8 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
   const [damageFlash, setDamageFlash] = useState(false);
   const [killFeed, setKillFeed] = useState<string[]>([]);
   const [earnedCoins, setEarnedCoins] = useState(0);
+  const [cameraMode, setCameraMode] = useState<CameraMode>("tpv");
+  const [lockOnTarget, setLockOnTarget] = useState<LockOnTarget | null>(null);
 
   const keysRef = useRef<Keys>({
     forward: false, backward: false, left: false, right: false,
@@ -139,6 +141,8 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
         case "KeyR": k.reload = true; break;
         case "KeyC": case "ControlLeft": k.crouch = true; break;
         case "ShiftLeft": k.run = true; break;
+        case "KeyV": setCameraMode(prev => prev === "fpv" ? "tpv" : "fpv"); break;
+        case "KeyQ": handleLockOn(); break;
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -157,20 +161,57 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
     const onMouseDown = () => { keysRef.current.fire = true; };
     const onMouseUp = () => { keysRef.current.fire = false; };
 
+    const onContextMenu = (e: Event) => { e.preventDefault(); handleLockOn(); };
+    const onWheel = (e: WheelEvent) => { cycleLockOnTarget(e.deltaY > 0 ? 1 : -1); };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("mousedown", onMouseDown);
     window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("wheel", onWheel);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("wheel", onWheel);
     };
   }, []);
 
   const addKillFeed = useCallback((msg: string) => {
     setKillFeed(prev => [msg, ...prev].slice(0, 5));
+  }, []);
+
+  // Lock-on targeting
+  const handleLockOn = useCallback(() => {
+    setLockOnTarget(prev => {
+      if (prev) return null; // toggle off
+      const p = playerRef.current;
+      const aliveEnemies = enemiesRef.current.filter(e => !e.isDead);
+      if (aliveEnemies.length === 0) return null;
+      let nearest = aliveEnemies[0];
+      let nearestDist = dist3d(p.position, nearest.position);
+      for (const e of aliveEnemies) {
+        const d = dist3d(p.position, e.position);
+        if (d < nearestDist) { nearest = e; nearestDist = d; }
+      }
+      if (nearestDist > 40) return null; // too far
+      return { enemyId: nearest.id, position: { ...nearest.position } };
+    });
+  }, []);
+
+  const cycleLockOnTarget = useCallback((direction: number) => {
+    setLockOnTarget(prev => {
+      if (!prev) return null;
+      const aliveEnemies = enemiesRef.current.filter(e => !e.isDead);
+      if (aliveEnemies.length === 0) return null;
+      const currentIdx = aliveEnemies.findIndex(e => e.id === prev.enemyId);
+      const nextIdx = (currentIdx + direction + aliveEnemies.length) % aliveEnemies.length;
+      const next = aliveEnemies[nextIdx];
+      return { enemyId: next.id, position: { ...next.position } };
+    });
   }, []);
 
   // Main game loop
@@ -561,6 +602,20 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
     return () => cancelAnimationFrame(animRef.current);
   }, [appliedWeapon, addKillFeed, hasRegen, speedMultiplier]);
 
+  // Update lock-on position each frame & break if dead/far
+  useEffect(() => {
+    if (!lockOnTarget) return;
+    const interval = setInterval(() => {
+      const target = enemiesRef.current.find(e => e.id === lockOnTarget.enemyId);
+      if (!target || target.isDead || dist3d(playerRef.current.position, target.position) > 45) {
+        setLockOnTarget(null);
+      } else {
+        setLockOnTarget({ enemyId: target.id, position: { ...target.position } });
+      }
+    }, 50);
+    return () => clearInterval(interval);
+  }, [lockOnTarget?.enemyId]);
+
   return {
     player,
     enemies,
@@ -572,6 +627,8 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
     mouseRotRef,
     keysRef,
     earnedCoins,
+    cameraMode,
+    lockOnTarget,
   };
 }
 
