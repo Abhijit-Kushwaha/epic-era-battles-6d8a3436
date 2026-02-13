@@ -7,6 +7,9 @@ import { use3DGameEngine } from "@/game/use3DGameEngine";
 import { ERA_COLORS } from "@/game/mapData";
 import { MapBlock, EnemyState, Projectile, PlayerState } from "@/game/types3d";
 import { PlayerEconomy } from "@/game/economySystem";
+import Minimap from "./Minimap";
+import NightVision from "./NightVision";
+import { useNightVision } from "@/hooks/useNightVision";
 
 interface CombatArena3DProps {
   era: Era;
@@ -255,6 +258,10 @@ function GameHUD({
   killFeed,
   eraId,
   earnedCoins,
+  nightVisionActive,
+  nightVisionBattery,
+  enemies,
+  mapBlocks,
   onExit,
 }: {
   player: PlayerState;
@@ -262,6 +269,10 @@ function GameHUD({
   killFeed: string[];
   eraId: string;
   earnedCoins: number;
+  nightVisionActive: boolean;
+  nightVisionBattery: number;
+  enemies: EnemyState[];
+  mapBlocks: MapBlock[];
   onExit: () => void;
 }) {
   return (
@@ -292,6 +303,22 @@ function GameHUD({
           />
         </div>
         <div className="font-body text-xs text-foreground mt-0.5">{Math.round(player.hp)}/{player.maxHp}</div>
+
+        {/* Night Vision Battery */}
+        <div className="mt-2">
+          <div className="font-display text-xs text-primary mb-0.5">🔋 NV {nightVisionActive ? "ON" : "OFF"}</div>
+          <div className="w-48 h-2 bg-muted rounded-full overflow-hidden border border-border">
+            <div
+              className="h-full rounded-full transition-all duration-200"
+              style={{
+                width: `${nightVisionBattery}%`,
+                background: nightVisionActive
+                  ? "linear-gradient(90deg, #00e676, #76ff03)"
+                  : "linear-gradient(90deg, #66bb6a, #a5d6a7)",
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Ammo */}
@@ -340,8 +367,11 @@ function GameHUD({
 
       {/* Controls hint */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 font-body text-xs text-muted-foreground animate-pulse">
-        Click to lock mouse • WASD move • Space jump • C crouch • Shift run • R reload • Mouse shoot
+        Click to lock mouse • WASD move • Space jump • C crouch • Shift run • R reload • N night vision • Mouse shoot
       </div>
+
+      {/* Minimap */}
+      <Minimap player={player} enemies={enemies} mapBlocks={mapBlocks} />
     </div>
   );
 }
@@ -360,6 +390,8 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
     earnedCoins,
   } = use3DGameEngine(era.id, economy);
 
+  const { active: nvActive, battery: nvBattery } = useNightVision();
+
   const eraId = era.id;
   const colors = ERA_COLORS[eraId as keyof typeof ERA_COLORS] || ERA_COLORS.ancient;
   const isFuture = eraId === "future";
@@ -376,14 +408,15 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         <div className="absolute inset-0 z-30 pointer-events-none bg-red-500/30" />
       )}
 
-      <GameHUD player={player} weapon={weapon} killFeed={killFeed} eraId={eraId} earnedCoins={earnedCoins} onExit={handleExit} />
+      <GameHUD player={player} weapon={weapon} killFeed={killFeed} eraId={eraId} earnedCoins={earnedCoins} nightVisionActive={nvActive} nightVisionBattery={nvBattery} enemies={enemies} mapBlocks={mapBlocks} onExit={handleExit} />
 
-      <Canvas
-        shadows
-        camera={{ fov: 70, near: 0.1, far: 200 }}
-        style={{ background: colors.sky }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
-      >
+      <NightVision active={nvActive}>
+        <Canvas
+          shadows
+          camera={{ fov: 70, near: 0.1, far: 200 }}
+          style={{ background: colors.sky }}
+          gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.2 }}
+        >
         {/* Enhanced lighting */}
         <ambientLight intensity={isFuture ? 0.2 : isModern ? 0.4 : 0.5} color={colors.ambient} />
         <directionalLight
@@ -464,6 +497,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         {/* Enhanced fog */}
         <fog attach="fog" color={colors.sky} near={isFuture ? 20 : 35} far={isFuture ? 45 : 90} />
       </Canvas>
+      </NightVision>
     </div>
   );
 };
