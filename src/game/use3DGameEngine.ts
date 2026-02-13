@@ -3,6 +3,7 @@ import { PlayerState, EnemyState, Projectile, Weapon, ERA_WEAPONS, Vec3 } from "
 import { generateMap, SPAWN_POINTS, PLAYER_SPAWN } from "./mapData";
 import { BotArchetype, getRandomArchetype, randomizePersonality } from "./botArchetypes";
 import { PlayerEconomy, KILL_REWARD, SHOP_ITEMS, addCoins } from "./economySystem";
+import { playShootSound, playHitSound, playFootstep, playReloadSound, startAmbient, stopAmbient } from "./soundSystem";
 
 const GRAVITY = -20;
 const JUMP_FORCE = 8;
@@ -61,6 +62,14 @@ function createEnemy(id: number, spawn: Vec3): EnemyState {
 
 export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
   const weapon = ERA_WEAPONS[eraId] || ERA_WEAPONS.ancient;
+  const eraIdRef = useRef(eraId);
+  eraIdRef.current = eraId;
+
+  // Start ambient sound on mount
+  useEffect(() => {
+    startAmbient(eraId);
+    return () => stopAmbient();
+  }, [eraId]);
 
   // Apply shop upgrades to weapon
   const appliedWeapon = applyUpgrades(weapon, economy);
@@ -274,6 +283,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
         if (keys.reload && !p.isReloading && p.ammo < appliedWeapon.magSize) {
           p.isReloading = true;
           p.reloadProgress = 0;
+          playReloadSound();
         }
 
         // Firing
@@ -281,6 +291,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
         if (keys.fire && !p.isReloading && p.ammo > 0 && now / 1000 - p.lastFireTime > fireInterval) {
           p.lastFireTime = now / 1000;
           p.ammo--;
+          playShootSound(eraIdRef.current);
 
           const pitch = mouseRotRef.current.pitch;
           const dir: Vec3 = {
@@ -301,8 +312,12 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
           if (p.ammo <= 0) {
             p.isReloading = true;
             p.reloadProgress = 0;
+            playReloadSound();
           }
         }
+
+        // Footsteps
+        if (len > 0) playFootstep(eraIdRef.current);
       } else {
         // Dead - respawn timer
         p.reloadProgress += dt / RESPAWN_TIME;
@@ -489,6 +504,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
             if (e.isDead) continue;
             if (dist3d(pr.position, { x: e.position.x, y: e.position.y + 0.8, z: e.position.z }) < 1) {
               e.hp -= pr.damage;
+              playHitSound();
               if (e.hp <= 0) {
                 e.isDead = true;
                 e.respawnTimer = RESPAWN_TIME;
@@ -503,6 +519,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
         } else {
           if (!p.isDead && dist3d(pr.position, { x: p.position.x, y: p.position.y + 0.8, z: p.position.z }) < 0.8) {
             p.hp -= pr.damage;
+            playHitSound();
             setDamageFlash(true);
             setTimeout(() => setDamageFlash(false), 150);
             if (p.hp <= 0) {
