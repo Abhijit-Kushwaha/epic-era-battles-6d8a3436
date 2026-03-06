@@ -448,6 +448,7 @@ function GameHUD({
   mapBlocks,
   cameraMode,
   lockOnTarget,
+  isAiming,
   onExit,
 }: {
   player: PlayerState;
@@ -461,6 +462,7 @@ function GameHUD({
   mapBlocks: MapBlock[];
   cameraMode: CameraMode;
   lockOnTarget: LockOnTarget | null;
+  isAiming: boolean;
   onExit: () => void;
 }) {
   return (
@@ -468,13 +470,18 @@ function GameHUD({
       {/* Crosshair */}
       {!player.isDead && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <div className="w-6 h-6 relative">
+          <div className={`relative transition-all duration-200 ${isAiming ? "w-4 h-4" : "w-6 h-6"}`}>
             <div className="absolute left-1/2 top-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-1/2 bottom-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
             <div className="absolute right-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
-            <div className={`absolute left-1/2 top-1/2 w-1 h-1 rounded-full -translate-x-1/2 -translate-y-1/2 ${lockOnTarget ? "bg-red-500" : "bg-red-500/60"}`} />
+            <div className={`absolute left-1/2 top-1/2 w-1 h-1 rounded-full -translate-x-1/2 -translate-y-1/2 ${lockOnTarget ? "bg-red-500" : isAiming ? "bg-red-400" : "bg-red-500/60"}`} />
           </div>
+          {isAiming && cameraMode === "tpv" && (
+            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-accent text-[10px] font-display whitespace-nowrap">
+              ADS
+            </div>
+          )}
           {lockOnTarget && (
             <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-red-400 text-[10px] font-display whitespace-nowrap">
               🎯 LOCKED
