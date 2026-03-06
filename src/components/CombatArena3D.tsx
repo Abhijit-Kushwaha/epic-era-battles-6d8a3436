@@ -112,11 +112,17 @@ function CameraController({
     const fpvZ = playerPos.z;
 
     // TPV camera: behind player with collision
-    const tpvDist = isDead ? 8 : 5;
-    const tpvHeight = isDead ? 4 : 2.5;
-    let tpvX = playerPos.x - Math.sin(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+    // Shoulder-aim: closer, offset right, lower FOV
+    const aimT = isAiming && cameraMode === "tpv" ? 1 : 0;
+    const tpvBaseDist = isDead ? 8 : 5;
+    const tpvBaseHeight = isDead ? 4 : 2.5;
+    const tpvDist = tpvBaseDist + (2.5 - tpvBaseDist) * aimT;
+    const tpvHeight = tpvBaseHeight + (2.8 - tpvBaseHeight) * aimT;
+    const shoulderOffsetX = 0.8 * aimT;
+    
+    let tpvX = playerPos.x - Math.sin(effectiveYaw) * Math.cos(effectivePitch) * tpvDist + Math.cos(effectiveYaw) * shoulderOffsetX;
     let tpvY = playerPos.y + tpvHeight - Math.sin(effectivePitch) * tpvDist * 0.3;
-    let tpvZ = playerPos.z - Math.cos(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+    let tpvZ = playerPos.z - Math.cos(effectiveYaw) * Math.cos(effectivePitch) * tpvDist - Math.sin(effectiveYaw) * shoulderOffsetX;
 
     // Simple wall collision for TPV: raycast from player to camera
     const origin = new THREE.Vector3(playerPos.x, playerPos.y + 1.5, playerPos.z);
@@ -155,19 +161,23 @@ function CameraController({
     const camY = fpvY * t + tpvY * (1 - t);
     const camZ = fpvZ * t + tpvZ * (1 - t);
 
+    // Look targets: when aiming in TPV, look at far aim point instead of player center
     const lookTarget = new THREE.Vector3(
       playerPos.x + Math.sin(effectiveYaw) * 10,
       playerPos.y + 1.6 + Math.sin(effectivePitch) * 5,
       playerPos.z + Math.cos(effectiveYaw) * 10
     );
     const tpvLookTarget = new THREE.Vector3(playerPos.x, playerPos.y + 1, playerPos.z);
+    // In TPV aiming mode, blend look target toward far aim point
+    const tpvFinalLook = new THREE.Vector3().lerpVectors(tpvLookTarget, lookTarget, aimT);
 
     camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.15);
-    const finalLook = new THREE.Vector3().lerpVectors(tpvLookTarget, lookTarget, t);
+    const finalLook = new THREE.Vector3().lerpVectors(tpvFinalLook, lookTarget, t);
     camera.lookAt(finalLook);
 
-    // Adjust FOV: FPV = 80, TPV = 70
-    const targetFov = 80 * t + 70 * (1 - t);
+    // Adjust FOV: FPV = 80, TPV = 70, TPV aiming = 55
+    const tpvFov = 70 + (55 - 70) * aimT;
+    const targetFov = 80 * t + tpvFov * (1 - t);
     (camera as THREE.PerspectiveCamera).fov += (targetFov - (camera as THREE.PerspectiveCamera).fov) * 0.1;
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
   });
@@ -574,6 +584,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
     earnedCoins,
     cameraMode,
     lockOnTarget,
+    isAiming,
   } = use3DGameEngine(era.id, economy);
 
   const { active: nvActive, battery: nvBattery } = useNightVision();
@@ -657,6 +668,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           isRunning={player.isRunning}
           lockOnTarget={lockOnTarget}
           mapBlocks={mapBlocks}
+          isAiming={isAiming}
         />
 
         {/* FPS Weapon */}
