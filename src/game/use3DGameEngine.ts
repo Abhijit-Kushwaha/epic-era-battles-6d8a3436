@@ -110,6 +110,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
   const [earnedCoins, setEarnedCoins] = useState(0);
   const [cameraMode, setCameraMode] = useState<CameraMode>("tpv");
   const [lockOnTarget, setLockOnTarget] = useState<LockOnTarget | null>(null);
+  const [isAiming, setIsAiming] = useState(false);
 
   const keysRef = useRef<Keys>({
     forward: false, backward: false, left: false, right: false,
@@ -158,10 +159,16 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
         case "ShiftLeft": k.run = false; break;
       }
     };
-    const onMouseDown = () => { keysRef.current.fire = true; };
-    const onMouseUp = () => { keysRef.current.fire = false; };
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button === 0) { keysRef.current.fire = true; }
+      if (e.button === 2) { setIsAiming(true); }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      if (e.button === 0) { keysRef.current.fire = false; }
+      if (e.button === 2) { setIsAiming(false); }
+    };
 
-    const onContextMenu = (e: Event) => { e.preventDefault(); handleLockOn(); };
+    const onContextMenu = (e: Event) => { e.preventDefault(); };
     const onWheel = (e: WheelEvent) => { cycleLockOnTarget(e.deltaY > 0 ? 1 : -1); };
 
     window.addEventListener("keydown", onKeyDown);
@@ -629,6 +636,7 @@ export function use3DGameEngine(eraId: string, economy?: PlayerEconomy) {
     earnedCoins,
     cameraMode,
     lockOnTarget,
+    isAiming,
   };
 }
 

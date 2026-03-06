@@ -28,6 +28,7 @@ function CameraController({
   isRunning,
   lockOnTarget,
   mapBlocks,
+  isAiming,
 }: {
   playerPos: { x: number; y: number; z: number };
   mouseRotRef: React.MutableRefObject<{ yaw: number; pitch: number }>;
@@ -37,6 +38,7 @@ function CameraController({
   isRunning: boolean;
   lockOnTarget: LockOnTarget | null;
   mapBlocks: MapBlock[];
+  isAiming: boolean;
 }) {
   const { camera, gl } = useThree();
   const isLocked = useRef(false);
@@ -112,11 +114,17 @@ function CameraController({
     const fpvZ = playerPos.z;
 
     // TPV camera: behind player with collision
-    const tpvDist = isDead ? 8 : 5;
-    const tpvHeight = isDead ? 4 : 2.5;
-    let tpvX = playerPos.x - Math.sin(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+    // Shoulder-aim: closer, offset right, lower FOV
+    const aimT = isAiming && cameraMode === "tpv" ? 1 : 0;
+    const tpvBaseDist = isDead ? 8 : 5;
+    const tpvBaseHeight = isDead ? 4 : 2.5;
+    const tpvDist = tpvBaseDist + (2.5 - tpvBaseDist) * aimT;
+    const tpvHeight = tpvBaseHeight + (2.8 - tpvBaseHeight) * aimT;
+    const shoulderOffsetX = 0.8 * aimT;
+    
+    let tpvX = playerPos.x - Math.sin(effectiveYaw) * Math.cos(effectivePitch) * tpvDist + Math.cos(effectiveYaw) * shoulderOffsetX;
     let tpvY = playerPos.y + tpvHeight - Math.sin(effectivePitch) * tpvDist * 0.3;
-    let tpvZ = playerPos.z - Math.cos(effectiveYaw) * Math.cos(effectivePitch) * tpvDist;
+    let tpvZ = playerPos.z - Math.cos(effectiveYaw) * Math.cos(effectivePitch) * tpvDist - Math.sin(effectiveYaw) * shoulderOffsetX;
 
     // Simple wall collision for TPV: raycast from player to camera
     const origin = new THREE.Vector3(playerPos.x, playerPos.y + 1.5, playerPos.z);
@@ -155,19 +163,23 @@ function CameraController({
     const camY = fpvY * t + tpvY * (1 - t);
     const camZ = fpvZ * t + tpvZ * (1 - t);
 
+    // Look targets: when aiming in TPV, look at far aim point instead of player center
     const lookTarget = new THREE.Vector3(
       playerPos.x + Math.sin(effectiveYaw) * 10,
       playerPos.y + 1.6 + Math.sin(effectivePitch) * 5,
       playerPos.z + Math.cos(effectiveYaw) * 10
     );
     const tpvLookTarget = new THREE.Vector3(playerPos.x, playerPos.y + 1, playerPos.z);
+    // In TPV aiming mode, blend look target toward far aim point
+    const tpvFinalLook = new THREE.Vector3().lerpVectors(tpvLookTarget, lookTarget, aimT);
 
     camera.position.lerp(new THREE.Vector3(camX, camY, camZ), 0.15);
-    const finalLook = new THREE.Vector3().lerpVectors(tpvLookTarget, lookTarget, t);
+    const finalLook = new THREE.Vector3().lerpVectors(tpvFinalLook, lookTarget, t);
     camera.lookAt(finalLook);
 
-    // Adjust FOV: FPV = 80, TPV = 70
-    const targetFov = 80 * t + 70 * (1 - t);
+    // Adjust FOV: FPV = 80, TPV = 70, TPV aiming = 55
+    const tpvFov = 70 + (55 - 70) * aimT;
+    const targetFov = 80 * t + tpvFov * (1 - t);
     (camera as THREE.PerspectiveCamera).fov += (targetFov - (camera as THREE.PerspectiveCamera).fov) * 0.1;
     (camera as THREE.PerspectiveCamera).updateProjectionMatrix();
   });
@@ -436,6 +448,7 @@ function GameHUD({
   mapBlocks,
   cameraMode,
   lockOnTarget,
+  isAiming,
   onExit,
 }: {
   player: PlayerState;
@@ -449,6 +462,7 @@ function GameHUD({
   mapBlocks: MapBlock[];
   cameraMode: CameraMode;
   lockOnTarget: LockOnTarget | null;
+  isAiming: boolean;
   onExit: () => void;
 }) {
   return (
@@ -456,13 +470,18 @@ function GameHUD({
       {/* Crosshair */}
       {!player.isDead && (
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          <div className="w-6 h-6 relative">
+          <div className={`relative transition-all duration-200 ${isAiming ? "w-4 h-4" : "w-6 h-6"}`}>
             <div className="absolute left-1/2 top-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-1/2 bottom-0 w-0.5 h-2 bg-white/80 -translate-x-1/2" />
             <div className="absolute left-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
             <div className="absolute right-0 top-1/2 w-2 h-0.5 bg-white/80 -translate-y-1/2" />
-            <div className={`absolute left-1/2 top-1/2 w-1 h-1 rounded-full -translate-x-1/2 -translate-y-1/2 ${lockOnTarget ? "bg-red-500" : "bg-red-500/60"}`} />
+            <div className={`absolute left-1/2 top-1/2 w-1 h-1 rounded-full -translate-x-1/2 -translate-y-1/2 ${lockOnTarget ? "bg-red-500" : isAiming ? "bg-red-400" : "bg-red-500/60"}`} />
           </div>
+          {isAiming && cameraMode === "tpv" && (
+            <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-accent text-[10px] font-display whitespace-nowrap">
+              ADS
+            </div>
+          )}
           {lockOnTarget && (
             <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-red-400 text-[10px] font-display whitespace-nowrap">
               🎯 LOCKED
@@ -551,7 +570,7 @@ function GameHUD({
 
       {/* Controls hint */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 font-body text-xs text-muted-foreground animate-pulse">
-        WASD move • Space jump • C crouch • Shift run • R reload • N night vision • V camera • Q lock-on • Scroll switch target
+        WASD move • Space jump • C crouch • Shift run • R reload • N night vision • V camera • Q lock-on • RMB aim • Scroll switch target
       </div>
 
       {/* Minimap */}
@@ -574,6 +593,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
     earnedCoins,
     cameraMode,
     lockOnTarget,
+    isAiming,
   } = use3DGameEngine(era.id, economy);
 
   const { active: nvActive, battery: nvBattery } = useNightVision();
@@ -604,7 +624,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         player={player} weapon={weapon} killFeed={killFeed} eraId={eraId}
         earnedCoins={earnedCoins} nightVisionActive={nvActive} nightVisionBattery={nvBattery}
         enemies={enemies} mapBlocks={mapBlocks} cameraMode={cameraMode}
-        lockOnTarget={lockOnTarget} onExit={handleExit}
+        lockOnTarget={lockOnTarget} isAiming={isAiming} onExit={handleExit}
       />
 
       <NightVision active={nvActive}>
@@ -657,6 +677,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
           isRunning={player.isRunning}
           lockOnTarget={lockOnTarget}
           mapBlocks={mapBlocks}
+          isAiming={isAiming}
         />
 
         {/* FPS Weapon */}
