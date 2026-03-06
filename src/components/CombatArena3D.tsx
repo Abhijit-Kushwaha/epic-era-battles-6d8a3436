@@ -28,6 +28,7 @@ function CameraController({
   isRunning,
   lockOnTarget,
   mapBlocks,
+  isAiming,
 }: {
   playerPos: { x: number; y: number; z: number };
   mouseRotRef: React.MutableRefObject<{ yaw: number; pitch: number }>;
@@ -37,6 +38,7 @@ function CameraController({
   isRunning: boolean;
   lockOnTarget: LockOnTarget | null;
   mapBlocks: MapBlock[];
+  isAiming: boolean;
 }) {
   const { camera, gl } = useThree();
   const isLocked = useRef(false);
