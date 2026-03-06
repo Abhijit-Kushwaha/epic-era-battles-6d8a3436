@@ -624,7 +624,7 @@ const CombatArena3D = ({ era, player: fighterData, economy, onEnd }: CombatArena
         player={player} weapon={weapon} killFeed={killFeed} eraId={eraId}
         earnedCoins={earnedCoins} nightVisionActive={nvActive} nightVisionBattery={nvBattery}
         enemies={enemies} mapBlocks={mapBlocks} cameraMode={cameraMode}
-        lockOnTarget={lockOnTarget} onExit={handleExit}
+        lockOnTarget={lockOnTarget} isAiming={isAiming} onExit={handleExit}
       />
 
       <NightVision active={nvActive}>
