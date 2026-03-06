@@ -570,7 +570,7 @@ function GameHUD({
 
       {/* Controls hint */}
       <div className="absolute bottom-20 left-1/2 -translate-x-1/2 font-body text-xs text-muted-foreground animate-pulse">
-        WASD move • Space jump • C crouch • Shift run • R reload • N night vision • V camera • Q lock-on • Scroll switch target
+        WASD move • Space jump • C crouch • Shift run • R reload • N night vision • V camera • Q lock-on • RMB aim • Scroll switch target
       </div>
 
       {/* Minimap */}
